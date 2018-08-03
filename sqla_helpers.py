@@ -1,4 +1,32 @@
 @contextmanager
+def sql_race_retry(session,
+                   max_retries=settings.DB_DEADLOCK_RETRIES,
+                   logger=None):
+    """Anti-deadlock
+       Create nested transaction with try block
+       in a struggle with race conditions.
+    """
+    if not logger:
+        logger = get_logger(__name__, 'am')
+
+    counter = 0
+    session.begin_nested()
+    while counter <= max_retries:
+        try:
+            yield
+            logger.debug('Committing session %s', session)
+            session.commit()
+            break
+        except (exc.IntegrityError, exc.OperationalError) as e:
+
+            logger.exception('SQL race detected, get & create again')
+
+            # The insert fail do to a concurrent transaction
+            session.rollback()
+
+        counter += 1
+
+@contextmanager
 def session_scope(session):
     """Provide a transactional scope around a series of operations."""
     session.begin()
